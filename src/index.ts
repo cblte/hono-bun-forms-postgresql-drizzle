@@ -34,6 +34,7 @@ async function fetchTasks(): Promise<Task[]> {
     return tasks as Task[];
   } catch (error: any) {
     console.error("Error fetching tasks:", error);
+    return [];
   }
 }
 
@@ -126,25 +127,39 @@ function renderCategoriesTable(categories: Category[]): string {
   return `
       <div class="categories-table">
         <h2>Categories</h2>
-        <table border="1" style="border-collapse: collapse; margin-top: 20px;">
+        
+        <form action="/categories" method="POST" style="margin: 20px 0;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" name="name" />
+            <button type="submit">Add category</button>
+          </div>
+        </form>
+
+
+        <table border="1" style="border-collapse: collapse;">
           <thead>
             <tr>
               <th style="padding: 8px;">ID</th>
               <th style="padding: 8px;">Name</th>
+              <th style="padding: 8px;">Actions</th>
             </tr>
           </thead>
           <tbody>
             ${
               categories.length === 0
-                ? '<tr><td colspan="2" style="padding: 8px; text-align: center">No categories found.</td></tr>'
+                ? '<tr><td colspan="3" style="padding: 8px; text-align: center">No categories found.</td></tr>'
                 : categories
                     .map(
                       (category) => `
-                  <tr>
-                    <td style="padding: 8px;">${category.id}</td>
-                    <td style="padding: 8px;">${category.name}</td>
-                  </tr>
-                `
+            <tr>
+              <td style="padding: 8px;">${category.id}</td>
+              <td style="padding: 8px;">${category.name}</td>
+              <td style="padding: 8px;">
+                <form action="/categories/${category.id}/delete" method="POST" style="margin: 0;">
+                  <button type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>`
                     )
                     .join("")
             }
@@ -154,10 +169,28 @@ function renderCategoriesTable(categories: Category[]): string {
     `;
 }
 
-function rendeTasksTable(tasks: Task[]): string {
+function rendeTasksTable(tasks: Task[], categories: Category[]): string {
   return `
       <div class="tasks-table">
         <h2>Tasks</h2>
+        
+        <form action="/tasks" method="POST">
+          <div>
+            <input type="text" name="title" />
+            <select id="options" name="category_id" required >
+              <option value="">Select a category</option>
+              ${categories
+                .map(
+                  (category) =>
+                    `<option value="${category.id}">${category.name}</option>`
+                )
+                .join("")}
+            </select>
+            <button type="submit">Add task</button>
+          </div>
+        </form>
+
+
         <table border="1" style="border-collapse: collapse; margin-top: 20px;">
           <thead>
             <tr>
@@ -166,24 +199,42 @@ function rendeTasksTable(tasks: Task[]): string {
               <th style="padding: 8px;">Status</th>
               <th style="padding: 8px;">Category</th>
               <th style="padding: 8px;">Created At</th>
+              <th style="padding: 8px;">Action</th>
             </tr>
           </thead>
           <tbody>
             ${
               tasks.length === 0
-                ? '<tr><td colspan="5" style="padding: 8px; text-align: center">No tasks found.</td></tr>'
+                ? '<tr><td colspan="6" style="padding: 8px; text-align: center">No tasks found.</td></tr>'
                 : tasks
                     .map(
                       (task) => `
-                    <tr>
-                      <td style="padding: 8px;">${task.id}</td>
-                      <td style="padding: 8px;">${task.title}</td>
-                      <td style="padding: 8px;">${task.done ? "✅" : "❌"}</td>
-                      <td style="padding: 8px;">${task.category_name}</td>
-                      <td style="padding: 8px;">${new Date(
-                        task.created_at
-                      ).toLocaleString()}</td>
-                    </tr>
+                        <tr>
+                          <td style="padding: 8px;">
+                            ${task.id}
+                          </td>
+                          <td style="padding: 8px;">${task.title}</td>
+                          <td style="padding: 8px;">
+                          <form action="/tasks/${task.id}/toggle" method="POST">
+                            <button type="submit" name="done" style="border: none; background: none; cursor: pointer;" >
+                              ${task.done ? "✅" : "❌"}
+                            </button>  
+                          </form>  
+                         
+                          </td>
+                          <td style="padding: 8px;">${task.category_name}</td>
+                          <td style="padding: 8px;">${new Date(
+                            task.created_at
+                          ).toLocaleString()}</td>
+
+                          <td style="padding: 8px;">
+                            <form action="/tasks/${
+                              task.id
+                            }/delete" method="POST" style="margin: 0;">
+                              <button type="submit" onclick="return confirm('Are you sure you want to delete?')">Delete</button>
+                            </form>
+                        </td>
+                        </tr>
                 `
                     )
                     .join("")
@@ -212,7 +263,7 @@ app.get("/", async (c) => {
         ${renderTableControls(tablesExist)}
         <div style="display: flex; gap: 40px;">
           ${renderCategoriesTable(categories)}
-          ${rendeTasksTable(tasks)}
+          ${rendeTasksTable(tasks, categories)}
         </div>
       </div>
     `;
@@ -253,6 +304,95 @@ app.post("/delete-tables", async (c) => {
     return c.redirect("/");
   } catch (error: any) {
     return c.text("Error deleting tables: " + error.message, 500);
+  }
+});
+
+app.post("/categories", async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const name = formData.get("name");
+
+    if (!name || typeof name !== "string") {
+      return c.text("Category name is required", 400);
+    }
+
+    await sql`
+      INSERT INTO categories (name) VALUES (${name})
+    `;
+    return c.redirect("/");
+  } catch (error: any) {
+    console.error("Error:", error.message);
+    return c.text("Error:" + error.message, 500);
+  }
+});
+
+app.post("/categories/:id/delete", async (c) => {
+  try {
+    const id = c.req.param("id");
+
+    await sql`
+      DELETE FROM categories 
+      WHERE id = ${id}
+    `;
+    return c.redirect("/");
+  } catch (error: any) {
+    console.error("Error:", error.message);
+    return c.text("Error:" + error.message, 500);
+  }
+});
+
+app.post("/tasks", async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const title = formData.get("title");
+    const category_id = formData.get("category_id");
+
+    if (!title || typeof title !== "string") {
+      return c.text("Task title is required", 400);
+    }
+
+    if (!category_id || typeof category_id !== "string") {
+      return c.text("Category ID is required", 400);
+    }
+
+    await sql`
+      INSERT INTO tasks (title, category_id) VALUES (${title}, ${category_id})
+    `;
+    return c.redirect("/");
+  } catch (error: any) {
+    console.error("Error:", error.message);
+    return c.text("Error:" + error.message, 500);
+  }
+});
+
+app.post("/tasks/:id/toggle", async (c) => {
+  try {
+    const id = c.req.param("id");
+
+    await sql`
+      UPDATE tasks 
+      SET done = NOT done 
+      WHERE id = ${id}
+    `;
+    return c.redirect("/");
+  } catch (error: any) {
+    console.error("Error:", error.message);
+    return c.text("Error:" + error.message, 500);
+  }
+});
+
+app.post("/tasks/:id/delete", async (c) => {
+  try {
+    const id = c.req.param("id");
+
+    await sql`
+      DELETE FROM tasks 
+      WHERE id = ${id}
+    `;
+    return c.redirect("/");
+  } catch (error: any) {
+    console.error("Error:", error.message);
+    return c.text("Error:" + error.message, 500);
   }
 });
 
