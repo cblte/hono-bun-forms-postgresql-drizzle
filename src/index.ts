@@ -1,12 +1,17 @@
 import { Hono } from 'hono';
-import { sql } from 'bun';
+
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { tasks, categories } from '../drizzle/schema';
+import { eq, desc, not } from 'drizzle-orm';
+
+const db = drizzle(process.env.DB_URL!);
 
 interface Task {
   id: number;
   title: string;
   done: boolean;
-  created_at: string;
-  category_name: string | null;
+  createdAt: string;
+  categoryName: string | null;
 }
 
 interface Category {
@@ -16,91 +21,78 @@ interface Category {
 
 const app = new Hono();
 
-// Helper function to check if tables exist
-async function checkTablesExist() {
-  try {
-    const result = await sql`
-      SELECT (
-        EXISTS (
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_name = 'categories'
-        ) AND EXISTS (
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_name = 'tasks'
-        )
-      ) AS tables_exist;
-    `;
-    return result[0].tables_exist;
-  } catch (error) {
-    console.error('Error checking tables:', error);
-    return false;
-  }
-}
-
-// Helper function to fetch tasks
+/**
+ * Fetches a list of tasks from the database.
+ *
+ * This function retrieves all tasks from the `tasks` table, along with their associated
+ * category names (if any) by performing a left join with the `categories` table.
+ * The results are ordered by the `createdAt` field in descending order.
+ *
+ * @returns {Promise<Task[]>} A promise that resolves to an array of `Task` objects.
+ * If an error occurs during the database query, an empty array is returned.
+ *
+ * @throws Logs an error message to the console if the database query fails.
+ */
 async function fetchTasks(): Promise<Task[]> {
   try {
-    const tasks = await sql`
-      SELECT
-        t.id,
-        t.title,
-        t.done,
-        t.created_at,
-        c.name as category_name
-      FROM tasks t
-      LEFT JOIN categories c ON t.category_id = c.id
-      ORDER BY t.created_at DESC;
-    `;
-    return tasks as Task[];
+    const result = await db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        done: tasks.done,
+        createdAt: tasks.createdAt,
+        categoryName: categories.name,
+      })
+      .from(tasks)
+      .leftJoin(categories, eq(tasks.categoryId, categories.id))
+      .orderBy(desc(tasks.createdAt));
+
+    return result as Task[];
   } catch (error) {
     console.error('Error fetching tasks:', error);
     return [];
   }
 }
 
-// Helper function to fetch categories
+/**
+ * Fetches a list of categories from the database.
+ *
+ * This function retrieves all categories from the `categories` table,
+ * selecting their `id` and `name` fields. The results are ordered
+ * alphabetically by the `name` field.
+ *
+ * @returns {Promise<Category[]>} A promise that resolves to an array of `Category` objects.
+ * If an error occurs during the database query, an empty array is returned.
+ *
+ * @throws Logs an error message to the console if the database query fails.
+ */
 async function fetchCategories(): Promise<Category[]> {
   try {
-    const categories = await sql`
-      SELECT id, name
-      FROM categories
-      ORDER BY name ASC;
-    `;
-    return categories as Category[];
+    const result = await db
+      .select({
+        id: categories.id,
+        name: categories.name,
+      })
+      .from(categories)
+      .orderBy(categories.name);
+
+    return result as Category[];
   } catch (error) {
     console.error('Error fetching categories:', error);
     return [];
   }
 }
 
-// Home route with conditional form display
+// Home route: Displays tasks and categories with forms for adding new ones
 app.get('/', async (c) => {
-  const tablesExist = await checkTablesExist();
-
-  if (!tablesExist) {
-    return c.html(`
-      <div>
-        <form action="/create-tables" method="POST">
-          <button type="submit">Create tables</button>
-        </form>
-      </div>
-    `);
-  }
-
   const [tasks, categories] = await Promise.all([fetchTasks(), fetchCategories()]);
 
   return c.html(`
     <div>
-      <form action="/delete-tables" method="POST">
-        <button type="submit">Delete tables</button>
-      </form>
-
+      <!-- Categories Section -->
       <div style="display: flex; gap: 40px;">
         <div class="categories-table">
           <h2>Categories</h2>
-
           <form action="/categories" method="POST" style="margin: 20px 0;">
             <div style="display: flex; gap: 8px; align-items: center;">
               <input
@@ -113,7 +105,6 @@ app.get('/', async (c) => {
               <button type="submit">Add Category</button>
             </div>
           </form>
-
           <table border="1" style="border-collapse: collapse;">
             <thead>
               <tr>
@@ -146,9 +137,9 @@ app.get('/', async (c) => {
           </table>
         </div>
 
+        <!-- Tasks Section -->
         <div class="tasks-table">
           <h2>Tasks</h2>
-
           <form action="/tasks" method="POST" style="margin: 20px 0;">
             <div style="display: flex; gap: 8px; align-items: center;">
               <input
@@ -171,7 +162,6 @@ app.get('/', async (c) => {
               <button type="submit">Add Task</button>
             </div>
           </form>
-
           <table border="1" style="border-collapse: collapse;">
             <thead>
               <tr>
@@ -202,8 +192,8 @@ app.get('/', async (c) => {
                         >
                       </form>
                     </td>
-                    <td style="padding: 8px;">${task.category_name || '-'}</td>
-                    <td style="padding: 8px;">${new Date(task.created_at).toLocaleString()}</td>
+                    <td style="padding: 8px;">${task.categoryName || '-'}</td>
+                    <td style="padding: 8px;">${new Date(task.createdAt).toLocaleString()}</td>
                     <td style="padding: 8px;">
                       <form action="/tasks/${task.id}/delete" method="POST" style="margin: 0;">
                         <button type="submit" onclick="return confirm('Are you sure you want to delete this task?')">Delete</button>
@@ -222,43 +212,15 @@ app.get('/', async (c) => {
   `);
 });
 
-// Handle the form submission via POST
-app.post('/create-tables', async (c) => {
-  try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS categories (
-          id SERIAL PRIMARY KEY,
-          name TEXT NOT NULL UNIQUE
-      );
-    `;
-    await sql`
-      CREATE TABLE IF NOT EXISTS tasks (
-          id SERIAL PRIMARY KEY,
-          title TEXT NOT NULL,
-          done BOOLEAN DEFAULT false,
-          created_at TIMESTAMP DEFAULT now(),
-          category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL
-      );
-    `;
-    return c.redirect('/');
-  } catch (error: any) {
-    console.log('Error:', error.message);
-    return c.text('Error creating tables: ' + error.message, 500);
-  }
-});
-
-// Handle table deletion
-app.post('/delete-tables', async (c) => {
-  try {
-    await sql`DROP TABLE IF EXISTS tasks;`;
-    await sql`DROP TABLE IF EXISTS categories;`;
-    return c.redirect('/');
-  } catch (error: any) {
-    console.log('Error:', error.message);
-    return c.text('Error deleting tables: ' + error.message, 500);
-  }
-});
-
+/**
+ * Handles the creation of a new category.
+ *
+ * This route processes form data submitted via POST to create a new category
+ * in the database. If the `name` field is missing or invalid, a 400 error is returned.
+ *
+ * @param {Context} c - The Hono context object.
+ * @returns {Response} A redirect to the home page or an error message.
+ */
 app.post('/categories', async (c) => {
   try {
     const formData = await c.req.formData();
@@ -268,10 +230,8 @@ app.post('/categories', async (c) => {
       return c.text('Category name is required', 400);
     }
 
-    await sql`
-      INSERT INTO categories (name)
-      VALUES (${name});
-    `;
+    await db.insert(categories).values({ name });
+
     return c.redirect('/');
   } catch (error: any) {
     console.log('Error:', error.message);
@@ -279,7 +239,16 @@ app.post('/categories', async (c) => {
   }
 });
 
-// Handle task creation
+/**
+ * Handles the creation of a new task.
+ *
+ * This route processes form data submitted via POST to create a new task
+ * in the database. If the `title` or `category_id` fields are missing or invalid,
+ * a 400 error is returned.
+ *
+ * @param {Context} c - The Hono context object.
+ * @returns {Response} A redirect to the home page or an error message.
+ */
 app.post('/tasks', async (c) => {
   try {
     const formData = await c.req.formData();
@@ -294,10 +263,10 @@ app.post('/tasks', async (c) => {
       return c.text('Category selection is required', 400);
     }
 
-    await sql`
-      INSERT INTO tasks (title, category_id)
-      VALUES (${title}, ${parseInt(categoryId, 10)});
-    `;
+    await db.insert(tasks).values({
+      title: title,
+      categoryId: parseInt(categoryId, 10),
+    });
 
     return c.redirect('/');
   } catch (error: any) {
@@ -306,16 +275,22 @@ app.post('/tasks', async (c) => {
   }
 });
 
-// Handle task status toggle
+/**
+ * Toggles the completion status of a task.
+ *
+ * This route updates the `done` field of a task in the database, flipping its value.
+ *
+ * @param {Context} c - The Hono context object.
+ * @returns {Response} A redirect to the home page or an error message.
+ */
 app.post('/tasks/:id/toggle', async (c) => {
   try {
     const taskId = c.req.param('id');
 
-    await sql`
-      UPDATE tasks
-      SET done = NOT done
-      WHERE id = ${parseInt(taskId, 10)};
-    `;
+    await db
+      .update(tasks)
+      .set({ done: not(tasks.done) })
+      .where(eq(tasks.id, parseInt(taskId, 10)));
 
     return c.redirect('/');
   } catch (error: any) {
@@ -324,15 +299,19 @@ app.post('/tasks/:id/toggle', async (c) => {
   }
 });
 
-// Handle task deletion
+/**
+ * Deletes a task from the database.
+ *
+ * This route removes a task identified by its ID from the `tasks` table.
+ *
+ * @param {Context} c - The Hono context object.
+ * @returns {Response} A redirect to the home page or an error message.
+ */
 app.post('/tasks/:id/delete', async (c) => {
   try {
     const taskId = c.req.param('id');
 
-    await sql`
-      DELETE FROM tasks
-      WHERE id = ${parseInt(taskId, 10)};
-    `;
+    await db.delete(tasks).where(eq(tasks.id, parseInt(taskId, 10)));
 
     return c.redirect('/');
   } catch (error: any) {
@@ -341,16 +320,19 @@ app.post('/tasks/:id/delete', async (c) => {
   }
 });
 
-// Handle category deletion
+/**
+ * Deletes a category from the database.
+ *
+ * This route removes a category identified by its ID from the `categories` table.
+ *
+ * @param {Context} c - The Hono context object.
+ * @returns {Response} A redirect to the home page or an error message.
+ */
 app.post('/categories/:id/delete', async (c) => {
   try {
     const categoryId = c.req.param('id');
 
-    // The category_id in tasks will be automatically set to NULL thanks to ON DELETE SET NULL
-    await sql`
-      DELETE FROM categories
-      WHERE id = ${parseInt(categoryId, 10)};
-    `;
+    await db.delete(categories).where(eq(categories.id, parseInt(categoryId, 10)));
 
     return c.redirect('/');
   } catch (error: any) {

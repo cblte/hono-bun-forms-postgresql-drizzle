@@ -1,5 +1,4 @@
 import { pgTable, unique, serial, varchar, foreignKey, text, boolean, timestamp, integer } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
 
 export const categories = pgTable(
   'categories',
