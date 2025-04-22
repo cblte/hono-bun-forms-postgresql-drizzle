@@ -83,131 +83,174 @@ async function fetchCategories(): Promise<Category[]> {
   }
 }
 
+/**
+ * Generates a table row for a task.
+ *
+ * @param {Task} task - The task to render.
+ * @returns {string} The HTML string for the task row.
+ */
+function renderTaskRow(task: Task): string {
+  return `
+    <tr>
+      <td style="padding: 8px;">${task.id}</td>
+      <td style="padding: 8px;">${task.title}</td>
+      <td style="padding: 8px;">
+        <form action="/tasks/${task.id}/toggle" method="POST" style="margin: 0;">
+          <input
+            type="checkbox"
+            ${task.done ? 'checked' : ''}
+            onchange="this.form.submit()"
+          >
+        </form>
+      </td>
+      <td style="padding: 8px;">${task.categoryName || '-'}</td>
+      <td style="padding: 8px;">${new Date(task.createdAt).toLocaleString()}</td>
+      <td style="padding: 8px;">
+        <form action="/tasks/${task.id}/delete" method="POST" style="margin: 0;">
+          <button type="submit" onclick="return confirm('Are you sure you want to delete this task?')">Delete</button>
+        </form>
+      </td>
+    </tr>
+  `;
+}
+
+/**
+ * Generates a table row for a category.
+ *
+ * @param {Category} category - The category to render.
+ * @returns {string} The HTML string for the category row.
+ */
+function renderCategoryRow(category: Category): string {
+  return `
+    <tr>
+      <td style="padding: 8px;">${category.id}</td>
+      <td style="padding: 8px;">${category.name}</td>
+      <td style="padding: 8px;">
+        <form action="/categories/${category.id}/delete" method="POST" style="margin: 0;">
+          <button type="submit" onclick="return confirm('Are you sure? This will also remove the category from all tasks.')">Delete</button>
+        </form>
+      </td>
+    </tr>
+  `;
+}
+
+/**
+ * Generates the HTML for a dropdown of categories.
+ *
+ * @param {Category[]} categories - The list of categories.
+ * @returns {string} The HTML string for the dropdown options.
+ */
+function renderCategoryOptions(categories: Category[]): string {
+  return categories.map((category) => `<option value="${category.id}">${category.name}</option>`).join('');
+}
+
+/**
+ * Generates the HTML for the categories table.
+ *
+ * @param {Category[]} categories - The list of categories to display.
+ * @returns {string} The HTML string for the categories section.
+ */
+function renderCategoriesTable(categories: Category[]): string {
+  const rows =
+    categories.length === 0
+      ? '<tr><td colspan="3" style="padding: 8px; text-align: center;">No categories found</td></tr>'
+      : categories.map(renderCategoryRow).join('');
+
+  return `
+    <div class="categories-table">
+      <h2>Categories</h2>
+      <form action="/categories" method="POST" style="margin: 20px 0;">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input
+            type="text"
+            name="name"
+            placeholder="Category name"
+            required
+            style="padding: 4px 8px;"
+          >
+          <button type="submit">Add Category</button>
+        </div>
+      </form>
+      <table border="1" style="border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th style="padding: 8px;">ID</th>
+            <th style="padding: 8px;">Name</th>
+            <th style="padding: 8px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/**
+ * Generates the HTML for the tasks table.
+ *
+ * @param {Task[]} tasks - The list of tasks to display.
+ * @param {Category[]} categories - The list of categories for the task form dropdown.
+ * @returns {string} The HTML string for the tasks section.
+ */
+function renderTasksTable(tasks: Task[], categories: Category[]): string {
+  const rows =
+    tasks.length === 0
+      ? '<tr><td colspan="6" style="padding: 8px; text-align: center;">No tasks found</td></tr>'
+      : tasks.map(renderTaskRow).join('');
+
+  const categoryOptions = renderCategoryOptions(categories);
+
+  return `
+    <div class="tasks-table">
+      <h2>Tasks</h2>
+      <form action="/tasks" method="POST" style="margin: 20px 0;">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input
+            type="text"
+            name="title"
+            placeholder="Task title"
+            required
+            style="padding: 4px 8px;"
+          >
+          <select name="category_id" required style="padding: 4px 8px;">
+            <option value="">Select a category</option>
+            ${categoryOptions}
+          </select>
+          <button type="submit">Add Task</button>
+        </div>
+      </form>
+      <table border="1" style="border-collapse: collapse;">
+        <thead>
+          <tr>
+            <th style="padding: 8px;">ID</th>
+            <th style="padding: 8px;">Title</th>
+            <th style="padding: 8px;">Status</th>
+            <th style="padding: 8px;">Category</th>
+            <th style="padding: 8px;">Created At</th>
+            <th style="padding: 8px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 // Home route: Displays tasks and categories with forms for adding new ones
 app.get('/', async (c) => {
   const [tasks, categories] = await Promise.all([fetchTasks(), fetchCategories()]);
 
-  return c.html(`
-    <div>
-      <!-- Categories Section -->
-      <div style="display: flex; gap: 40px;">
-        <div class="categories-table">
-          <h2>Categories</h2>
-          <form action="/categories" method="POST" style="margin: 20px 0;">
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <input
-                type="text"
-                name="name"
-                placeholder="Category name"
-                required
-                style="padding: 4px 8px;"
-              >
-              <button type="submit">Add Category</button>
-            </div>
-          </form>
-          <table border="1" style="border-collapse: collapse;">
-            <thead>
-              <tr>
-                <th style="padding: 8px;">ID</th>
-                <th style="padding: 8px;">Name</th>
-                <th style="padding: 8px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${
-                categories.length === 0
-                  ? '<tr><td colspan="3" style="padding: 8px; text-align: center;">No categories found</td></tr>'
-                  : categories
-                      .map(
-                        (category) => `
-                  <tr>
-                    <td style="padding: 8px;">${category.id}</td>
-                    <td style="padding: 8px;">${category.name}</td>
-                    <td style="padding: 8px;">
-                      <form action="/categories/${category.id}/delete" method="POST" style="margin: 0;">
-                        <button type="submit" onclick="return confirm('Are you sure? This will also remove the category from all tasks.')">Delete</button>
-                      </form>
-                    </td>
-                  </tr>
-                `
-                      )
-                      .join('')
-              }
-            </tbody>
-          </table>
-        </div>
+  const categoriesHTML = renderCategoriesTable(categories);
+  const tasksHTML = renderTasksTable(tasks, categories);
 
-        <!-- Tasks Section -->
-        <div class="tasks-table">
-          <h2>Tasks</h2>
-          <form action="/tasks" method="POST" style="margin: 20px 0;">
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <input
-                type="text"
-                name="title"
-                placeholder="Task title"
-                required
-                style="padding: 4px 8px;"
-              >
-              <select name="category_id" required style="padding: 4px 8px;">
-                <option value="">Select a category</option>
-                ${categories
-                  .map(
-                    (category) => `
-                  <option value="${category.id}">${category.name}</option>
-                `
-                  )
-                  .join('')}
-              </select>
-              <button type="submit">Add Task</button>
-            </div>
-          </form>
-          <table border="1" style="border-collapse: collapse;">
-            <thead>
-              <tr>
-                <th style="padding: 8px;">ID</th>
-                <th style="padding: 8px;">Title</th>
-                <th style="padding: 8px;">Status</th>
-                <th style="padding: 8px;">Category</th>
-                <th style="padding: 8px;">Created At</th>
-                <th style="padding: 8px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${
-                tasks.length === 0
-                  ? '<tr><td colspan="6" style="padding: 8px; text-align: center;">No tasks found</td></tr>'
-                  : tasks
-                      .map(
-                        (task) => `
-                  <tr>
-                    <td style="padding: 8px;">${task.id}</td>
-                    <td style="padding: 8px;">${task.title}</td>
-                    <td style="padding: 8px;">
-                      <form action="/tasks/${task.id}/toggle" method="POST" style="margin: 0;">
-                        <input
-                          type="checkbox"
-                          ${task.done ? 'checked' : ''}
-                          onchange="this.form.submit()"
-                        >
-                      </form>
-                    </td>
-                    <td style="padding: 8px;">${task.categoryName || '-'}</td>
-                    <td style="padding: 8px;">${new Date(task.createdAt).toLocaleString()}</td>
-                    <td style="padding: 8px;">
-                      <form action="/tasks/${task.id}/delete" method="POST" style="margin: 0;">
-                        <button type="submit" onclick="return confirm('Are you sure you want to delete this task?')">Delete</button>
-                      </form>
-                    </td>
-                  </tr>
-                `
-                      )
-                      .join('')
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>
+  return c.html(`
+    <div style="display: flex; gap: 40px;">
+      ${categoriesHTML}
+      ${tasksHTML}
     </div>
   `);
 });
